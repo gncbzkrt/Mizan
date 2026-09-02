@@ -1,0 +1,96 @@
+name: Mizan APK Oluştur
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kaynakları al
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK kur
+        uses: android-actions/setup-android@v3
+
+      - name: Android 35 araçlarını kur
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Mizan paketini bul ve aç
+        run: |
+          echo "Repo içeriği:"
+          ls -la
+
+          COUNT=$(find . -maxdepth 1 -type f -iname "Mizan*.zip" | wc -l)
+
+          if [ "$COUNT" -eq 0 ]; then
+            echo "HATA: Repo kökünde Mizan ZIP bulunamadı."
+            exit 1
+          fi
+
+          if [ "$COUNT" -gt 1 ]; then
+            echo "HATA: Birden fazla Mizan ZIP var."
+            echo "Eski ZIP'leri sil ve yalnız kurulacak sürümü bırak."
+            find . -maxdepth 1 -type f -iname "Mizan*.zip"
+            exit 1
+          fi
+
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "Mizan*.zip" | head -n 1)
+
+          echo "Kullanılacak paket: $ZIP_FILE"
+
+          rm -rf mizan_build
+          mkdir -p mizan_build
+          unzip -q "$ZIP_FILE" -d mizan_build
+
+          echo "Paket açıldı."
+          find mizan_build -maxdepth 3 -type f | sort | head -100
+
+      - name: APK oluştur
+        run: |
+          BUILD_SCRIPT=$(find mizan_build -name "build.sh" -type f | head -n 1)
+
+          if [ -z "$BUILD_SCRIPT" ]; then
+            echo "HATA: ZIP içinde build.sh bulunamadı."
+            exit 1
+          fi
+
+          BUILD_DIR=$(dirname "$BUILD_SCRIPT")
+
+          echo "Proje klasörü: $BUILD_DIR"
+
+          cd "$BUILD_DIR"
+
+          chmod +x build.sh
+
+          export MIZAN_ANDROID_SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          export MIZAN_JDK="$JAVA_HOME"
+
+          ./build.sh
+
+      - name: APK kontrolü
+        run: |
+          echo "Oluşturulan APK:"
+          find mizan_build -type f -path "*/output/*.apk" -print
+
+          APK_COUNT=$(find mizan_build -type f -path "*/output/*.apk" | wc -l)
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "HATA: APK üretilemedi."
+            exit 1
+          fi
+
+      - name: APK'yı indirilebilir hale getir
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mizan-APK
+          path: "mizan_build/**/output/*.apk"
+          if-no-files-found: error
